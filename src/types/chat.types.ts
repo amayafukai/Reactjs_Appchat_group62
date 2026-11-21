@@ -35,9 +35,12 @@ export interface ChatUser {
 
 export interface ChatMessage {
   id?: number | string;
-  name: string;      // Username người gửi
-  to: string;        // Username người nhận
-  mess: string;      // Nội dung tin nhắn
+  name: string; 
+  to: string; 
+  mes?: string; 
+  mess?: string; 
   createAt?: string;
-  type?: 'people' | 'room';
+  type?: 'people' | 'room' | number;
 }
+
+export const getMessageText = (m: ChatMessage): string => m.mes ?? m.mess ?? '';

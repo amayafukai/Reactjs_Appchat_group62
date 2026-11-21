@@ -31,21 +31,27 @@ const chatSlice = createSlice({
   name: 'chat',
   initialState,
   reducers: {
-    // 1. Lưu danh sách từ GET_USER_LIST
     setUserList: (state, action: PayloadAction<ChatUser[]>) => {
-      // Lọc các cuộc trò chuyện cá nhân (type === 0)
-      state.userList = action.payload.filter((item) => item.type === 0);
+      const incoming = action.payload.filter((item) => item.type === 0);
+      // Giữ lại trạng thái online đã biết
+      state.userList = incoming.map((u) => ({
+        ...u,
+        isOnline: state.userList.find((old) => old.name === u.name)?.isOnline,
+      }));
     },
 
-    // 2. Chọn người dùng để mở khung chat
     setActiveChatUser: (state, action: PayloadAction<string>) => {
       const username = action.payload;
       state.activeChatUser = username;
-      if (!state.pageByUser[username]) {
-        state.pageByUser[username] = 1;
-      }
-      if (state.hasMoreByUser[username] === undefined) {
-        state.hasMoreByUser[username] = true;
+      if (!state.pageByUser[username]) state.pageByUser[username] = 1;
+      if (state.hasMoreByUser[username] === undefined) state.hasMoreByUser[username] = true;
+
+      if (!state.userList.some((u) => u.name === username)) {
+        state.userList.unshift({
+          name: username,
+          type: 0,
+          actionTime: new Date().toISOString(),
+        });
       }
     },
 
@@ -53,7 +59,6 @@ const chatSlice = createSlice({
       state.isLoadingHistory = action.payload;
     },
 
-    // 3. Lưu lịch sử tin nhắn từ GET_PEOPLE_CHAT_MES
     setPeopleMessages: (
       state,
       action: PayloadAction<{ partner: string; messages: ChatMessage[]; page: number }>
@@ -61,67 +66,50 @@ const chatSlice = createSlice({
       const { partner, messages, page } = action.payload;
       state.isLoadingHistory = false;
 
-      // Server thường trả về tin nhắn mới nhất ở đầu mảng -> đảo ngược để hiển thị từ cũ đến mới
-      const chronologicalMessages = [...messages].reverse();
+      const chronological = [...messages].reverse();
 
       if (page === 1) {
-        state.messagesByUser[partner] = chronologicalMessages;
+        state.messagesByUser[partner] = chronological;
       } else {
-        const currentMessages = state.messagesByUser[partner] || [];
-        state.messagesByUser[partner] = [...chronologicalMessages, ...currentMessages];
+        const current = state.messagesByUser[partner] ?? [];
+        state.messagesByUser[partner] = [...chronological, ...current];
       }
 
       state.pageByUser[partner] = page;
-      // Nếu server trả về rỗng nghĩa là đã hết tin nhắn cũ
       state.hasMoreByUser[partner] = messages.length > 0;
     },
 
-    // 4. Xử lý gửi/nhận tin nhắn realtime từ SEND_CHAT (type = 'people')
     addRealtimePeopleMessage: (
       state,
       action: PayloadAction<{ message: ChatMessage; currentUser: string }>
     ) => {
       const { message, currentUser } = action.payload;
-      // Nếu mình gửi thì đối phương là `to`, nếu đối phương gửi thì đối phương là `name`
       const partner = message.name === currentUser ? message.to : message.name;
 
-      if (!state.messagesByUser[partner]) {
-        state.messagesByUser[partner] = [];
-      }
+      if (!state.messagesByUser[partner]) state.messagesByUser[partner] = [];
       state.messagesByUser[partner].push(message);
 
-      // Cập nhật và đẩy partner lên đầu danh sách cuộc trò chuyện
       const existingIndex = state.userList.findIndex((u) => u.name === partner);
-      const existingOnlineStatus =
-        existingIndex !== -1 ? state.userList[existingIndex].isOnline : true;
+      const existingOnline = existingIndex !== -1 ? state.userList[existingIndex].isOnline : undefined;
+      if (existingIndex !== -1) state.userList.splice(existingIndex, 1);
 
-      const updatedUser: ChatUser = {
+      state.userList.unshift({
         name: partner,
         type: 0,
         actionTime: new Date().toISOString(),
-        isOnline: existingOnlineStatus,
-      };
-
-      if (existingIndex !== -1) {
-        state.userList.splice(existingIndex, 1);
-      }
-      state.userList.unshift(updatedUser);
+        isOnline: existingOnline,
+      });
     },
 
-    // 5. Lưu kết quả kiểm tra tồn tại & online từ CHECK_USER
     setCheckedUser: (state, action: PayloadAction<CheckedUserResult | null>) => {
       state.checkedUser = action.payload;
-
-      // Đồng bộ luôn trạng thái online nếu user này đang nằm trong userList
-      if (action.payload && action.payload.exists) {
-        const userInList = state.userList.find((u) => u.name === action.payload?.username);
-        if (userInList) {
-          userInList.isOnline = action.payload.isOnline;
-        }
+      const result = action.payload;
+      if (result && result.exists) {
+        const u = state.userList.find((x) => x.name === result.username);
+        if (u) u.isOnline = result.isOnline;
       }
     },
 
-    // 6. Xóa dữ liệu khi LOGOUT[cite: 1]
     resetChatState: () => initialState,
   },
 });
